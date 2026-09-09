@@ -1,14 +1,9 @@
 'use client';
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import * as XLSX from 'xlsx';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from '@/app/lib/supabase'; // 1. Pakai singleton Supabase client
 
 interface PegawaiDetail {
   id?: string;
@@ -32,9 +27,10 @@ export default function DetailStatusPegawai() {
   const decodedUnit = typeof unit === 'string' ? decodeURIComponent(unit) : '';
   const decodedStatus = decodeURIComponent(status);
 
-  // LOGIKA DETEKSI OPSi FIKTIF ADMIN
+  // LOGIKA DETEKSI OPSI FIKTIF ADMIN
   const isSemuaUnit = decodedUnit.toUpperCase().includes('SEMUA');
 
+  const [authorized, setAuthorized] = useState(false); // State Guard Autentikasi
   const [allUnitPegawai, setAllUnitPegawai] = useState<PegawaiDetail[]>([]);
   const [statusStats, setStatusStats] = useState<Record<string, number>>({
     'Sudah': 0,
@@ -129,7 +125,7 @@ export default function DetailStatusPegawai() {
     return 'Tidak Ada Data';
   }, []);
 
-  // PERBAIKAN: RESET PAGING SETIAP KALI URL STATUS BERUBAH
+  // RESET PAGING SETIAP KALI URL STATUS BERUBAH
   useEffect(() => {
     setCurrentPage(1);
     setPageInput('1');
@@ -138,13 +134,50 @@ export default function DetailStatusPegawai() {
     setSearchTermJenis('');
   }, [decodedStatus]);
 
+  // VALIDASI AUTENTIKASI & PROSES FETCH DATA
   useEffect(() => {
     let isMounted = true;
 
-    async function fetchAllDataRecursive() {
+    async function checkAuthAndFetchData() {
       if (!decodedUnit) return;
       setLoading(true);
 
+      // 2. Cek Sesi Supabase
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/login');
+        return;
+      }
+
+      // 3. Tarik profil role & unit kerja dari users_login
+      const { data: profile, error: profileError } = await supabase
+        .from('users_login')
+        .select('role, unit_kerja')
+        .eq('user_id', session.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        console.error('Data profil tidak ditemukan:', profileError);
+        router.push('/login');
+        return;
+      }
+
+      const role = profile.role || 'user';
+      const userUnit = profile.unit_kerja || '';
+
+      // Otorisasi Akses
+      if (
+        role !== 'admin' &&
+        userUnit.toLowerCase() !== decodedUnit.toLowerCase()
+      ) {
+        alert('AKSES DITOLAK! Anda tidak memiliki hak untuk mengakses unit kerja ini.');
+        router.push('/');
+        return;
+      }
+
+      if (isMounted) setAuthorized(true);
+
+      // 4. Fetching Data Pegawai (Recursive Chunk Offset)
       let semuaData: PegawaiDetail[] = [];
       let limit = 1000;
       let offset = 0;
@@ -198,12 +231,12 @@ export default function DetailStatusPegawai() {
       }
     }
 
-    fetchAllDataRecursive();
+    checkAuthAndFetchData();
 
     return () => {
       isMounted = false;
     };
-  }, [decodedUnit, isSemuaUnit, getNormalizedStatus]);
+  }, [decodedUnit, isSemuaUnit, getNormalizedStatus, router]);
 
   const filteredData = useMemo(() => {
     const targetStatusNorm = getNormalizedStatus(decodedStatus);
@@ -314,6 +347,16 @@ export default function DetailStatusPegawai() {
 
     XLSX.writeFile(wb, `Rekap_Semua_Status_${decodedUnit}.xlsx`);
   };
+
+  if (!authorized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
+        <p className="text-sm font-mono animate-pulse">
+          Memeriksa Kredensial Keamanan...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <main className="min-h-screen text-white px-3 py-6 sm:px-6 md:p-12 relative overflow-x-hidden overflow-y-auto flex flex-col justify-between selection:bg-cyan-500 selection:text-white animated-bg">

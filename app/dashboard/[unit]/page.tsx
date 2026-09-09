@@ -1,13 +1,8 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { useParams, useRouter } from 'next/navigation';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from '@/app/lib/supabase';
 
 interface KinerjaItem {
   kuadran?: string;
@@ -200,42 +195,66 @@ export default function DashboardUnit() {
     let isMounted = true;
 
     async function checkAuthAndFetchData() {
-      const sessionStr = localStorage.getItem('dypral_session');
+      const { data: { session } } = await supabase.auth.getSession();
 
-      if (!sessionStr) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (!session) {
         router.push('/login');
         return;
       }
 
       try {
-        const parsedSession = JSON.parse(sessionStr);
-        const role = parsedSession.role || 'user';
-        const userUnit = parsedSession.unitKerja || '';
+        const { data: profile, error: profileError } = await supabase
+          .from('users_login')
+          .select('role, unit_kerja')
+          .eq('user_id', session.user.id)
+          .single();
 
-        if (
-          role !== 'admin' &&
-          userUnit.toLowerCase() !== decodedUnit.toLowerCase()
-        ) {
-          alert(
-            'AKSES DITOLAK!!! ANDA TIDAK MEMILIKI HAK UNTUK MENGAKSES UNIT KERJA INI!!!'
-          );
-          router.push('/');
+        if (profileError || !profile) {
+          console.error('Sesi rusak/Profil tidak ditemukan:', profileError);
+          router.push('/login');
           return;
         }
 
-        setAuthorized(true);
+        const role = profile.role || 'user';
+        const userUnit = profile.unit_kerja || '';
+
+        // OTORISASI AKSES UNIT KERJA (Support Array & String)
+        if (role !== 'admin') {
+          let hasAccess = false;
+          const targetUnit = String(decodedUnit || '').toLowerCase();
+
+          if (Array.isArray(userUnit)) {
+            hasAccess = userUnit.some(
+              (u: string) => String(u || '').toLowerCase() === targetUnit
+            );
+          } else if (typeof userUnit === 'string') {
+            hasAccess = userUnit.toLowerCase() === targetUnit;
+          }
+
+          if (!hasAccess) {
+            alert(
+              'AKSES DITOLAK! Anda tidak memiliki hak untuk mengakses unit kerja ini.'
+            );
+            router.push('/');
+            return;
+          }
+        }
+
+        if (isMounted) setAuthorized(true);
       } catch (e) {
-        console.error('Session rusak:', e);
+        console.error('Error Validasi Akses:', e);
         router.push('/login');
         return;
       }
 
+      // Ambil Info Metadata Update dari Supabase
       const { data: infoData, error: infoError } = await supabase
         .from('metadata_update')
         .select('*')
         .order('id', { ascending: false })
         .limit(1);
+
+      console.log('DEBUG METADATA:', infoData, infoError);
 
       if (infoError) {
         console.error('Error Info Update:', infoError);
@@ -244,15 +263,25 @@ export default function DashboardUnit() {
       if (infoData && infoData.length > 0) {
         const rawTimestamp =
           infoData[0].created_at || infoData[0].updated_at || infoData[0].tanggal;
+        
         if (rawTimestamp) {
-          const formattedDate = new Intl.DateTimeFormat('id-ID', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          }).format(new Date(rawTimestamp));
-          if (isMounted) setLastUpdated(formattedDate);
+          // Bersihkan string timestamp agar aman diparsing JS di semua environment browser
+          const safeIsoString = String(rawTimestamp).replace(' ', 'T');
+          const parsedDate = new Date(safeIsoString);
+
+          if (!isNaN(parsedDate.getTime())) {
+            const formattedDate = new Intl.DateTimeFormat('id-ID', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            }).format(parsedDate);
+            
+            if (isMounted) setLastUpdated(formattedDate);
+          } else {
+            if (isMounted) setLastUpdated(String(rawTimestamp));
+          }
         }
       }
 
@@ -261,6 +290,7 @@ export default function DashboardUnit() {
         return;
       }
 
+      // Eksekusi RPC get_statistik_kinerja
       const { data, error } = await supabase.rpc('get_statistik_kinerja', {
         target_unit: decodedUnit,
       });
@@ -530,24 +560,22 @@ export default function DashboardUnit() {
               <p className="text-slate-300 text-xs sm:text-sm">
                 Laporan Dinamis Penilaian Kinerja Triwulanan
               </p>
-              {lastUpdated && (
-                <span className="inline-flex items-center text-[10px] sm:text-xs text-white-300 bg-white-500/10 border border-White-500/20 px-2 py-0.5 rounded-md w-fit">
-                  <svg
-                    className="w-3 h-3 mr-1 text-cyan-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  Update data BKN pada: {lastUpdated}
-                </span>
-              )}
+              <span className="inline-flex items-center text-[10px] sm:text-xs text-slate-300 bg-white/10 border border-white/20 px-2 py-0.5 rounded-md w-fit">
+                <svg
+                  className="w-3 h-3 mr-1 text-cyan-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                Update data BKN pada: {lastUpdated || 'Memuat...'}
+              </span>
             </div>
           </div>
 

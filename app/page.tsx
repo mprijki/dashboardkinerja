@@ -1,18 +1,13 @@
 'use client';
 
-import { createClient } from '@supabase/supabase-js';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import { supabase } from '@/app/lib/supabase';
 
 interface LokasiItem {
-  unit_kerja: string;
+  unit_kerja: string | string[];
 }
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 type ThemeType = 'neon' | 'sunset' | 'ocean' | 'emerald' | 'splash';
 
@@ -35,34 +30,10 @@ export default function Home() {
   const [theme, setTheme] = useState<ThemeType>('neon');
 
   const [userRole, setUserRole] = useState<string>('');
-  const [userUnitKerja, setUserUnitKerja] = useState<string>('');
+  const [userUnitKerja, setUserUnitKerja] = useState<string | string[]>('');
+  const [selectedUserUnit, setSelectedUserUnit] = useState<string>('');
 
   const router = useRouter();
-
-  useEffect(() => {
-    const session = localStorage.getItem('dypral_session');
-    if (!session) {
-      router.push('/login');
-      return;
-    }
-
-    try {
-      const parsedSession = JSON.parse(session);
-      const role = parsedSession.role || 'user';
-      const unit = parsedSession.unitKerja || '';
-
-      setUserRole(role);
-      setUserUnitKerja(unit);
-
-      if (role !== 'admin' && unit) {
-        setInputKetik(unit);
-        setLokasi([{ unit_kerja: unit }]);
-      }
-    } catch (e) {
-      console.error('Gagal parsing sesi:', e);
-      router.push('/login');
-    }
-  }, [router]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('dypral_theme') as ThemeType;
@@ -76,43 +47,64 @@ export default function Home() {
     localStorage.setItem('dypral_theme', newTheme);
   };
 
+  // SINKRONISASI SUPABASE: Cek Sesi User & Load Data Unit Kerja
   useEffect(() => {
     let isMounted = true;
 
-    async function fetchData() {
+    async function initSessionAndData() {
       try {
-        const sessionStr = localStorage.getItem('dypral_session');
-        const parsedSession = sessionStr ? JSON.parse(sessionStr) : null;
-        const role = parsedSession?.role || 'user';
-        const unit = parsedSession?.unitKerja || '';
+        const { data: { session } } = await supabase.auth.getSession();
 
-        const { data, error } = await supabase.rpc('get_unit_kerja_unik');
-        if (error) throw error;
+        if (!session) {
+          router.push('/login');
+          return;
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('users_login')
+          .select('role, unit_kerja')
+          .eq('user_id', session.user.id)
+          .single();
+
+        if (profileError || !profile) {
+          console.error('Gagal mengambil data profil:', profileError);
+          router.push('/login');
+          return;
+        }
+
+        const role = profile.role || 'user';
+        const unit = profile.unit_kerja || '';
 
         if (isMounted) {
-          if (data && data.length > 0) {
-            if (role !== 'admin' && unit) {
-              const filteredUnit = data.filter(
-                (item: LokasiItem) => item.unit_kerja?.toLowerCase() === unit.toLowerCase()
-              );
-              setLokasi(filteredUnit.length > 0 ? filteredUnit : [{ unit_kerja: unit }]);
+          setUserRole(role);
+          setUserUnitKerja(unit);
+
+          // Jika user biasa dan unit kerja berupa array
+          if (role !== 'admin' && unit) {
+            if (Array.isArray(unit)) {
+              setSelectedUserUnit(unit[0] || '');
+              setInputKetik(unit.join(', '));
+              setLokasi(unit.map((u: string) => ({ unit_kerja: u })));
             } else {
-              const opsiSemua = [{ unit_kerja: 'SEMUA PERANGKAT DAERAH' }, ...data];
-              setLokasi(opsiSemua);
+              setSelectedUserUnit(unit);
+              setInputKetik(unit);
+              setLokasi([{ unit_kerja: unit }]);
             }
-          } else if (unit) {
-            setLokasi([{ unit_kerja: unit }]);
           }
         }
+
+        // Tarik opsi list unit kerja
+        const { data: rpcData, error: rpcError } = await supabase.rpc('get_unit_kerja_unik');
+        
+        if (isMounted && role === 'admin') {
+          if (!rpcError && rpcData && rpcData.length > 0) {
+            const opsiSemua = [{ unit_kerja: 'SEMUA PERANGKAT DAERAH' }, ...rpcData];
+            setLokasi(opsiSemua);
+          }
+        }
+
       } catch (err) {
-        console.error('Gagal mengambil data unit kerja:', err);
-        const sessionStr = localStorage.getItem('dypral_session');
-        if (sessionStr && isMounted) {
-          const parsed = JSON.parse(sessionStr);
-          if (parsed.unitKerja) {
-            setLokasi([{ unit_kerja: parsed.unitKerja }]);
-          }
-        }
+        console.error('Terjadi kesalahan koneksi:', err);
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -120,22 +112,28 @@ export default function Home() {
       }
     }
 
-    fetchData();
+    initSessionAndData();
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [router]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('dypral_session');
-    localStorage.removeItem('dypral_token');
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     router.push('/login');
   };
 
-  const filtered = lokasi.filter((item) =>
-    item.unit_kerja?.toLowerCase().includes(inputKetik.toLowerCase())
-  );
+  // Filter aman untuk Array / String
+  const filtered = lokasi.filter((item) => {
+    const search = String(inputKetik || '').toLowerCase();
+    
+    if (Array.isArray(item.unit_kerja)) {
+      return item.unit_kerja.some((u) => String(u).toLowerCase().includes(search));
+    }
+    
+    return String(item.unit_kerja || '').toLowerCase().includes(search);
+  });
 
   const isLight = theme === 'splash';
 
@@ -348,80 +346,116 @@ export default function Home() {
         <p className="text-xs opacity-80 mb-6 text-center">
           {userRole === 'admin'
             ? 'Pilih Perangkat Daerah untuk lanjut ke Dashboard'
-            : `Unit Kerja Anda: ${userUnitKerja || 'Memuat...'}`}
+            : 'Pilih / Masuk ke Unit Kerja Anda'}
         </p>
 
-        <div className="relative w-full mb-4">
-          <input
-            type="text"
-            placeholder="Cari Perangkat Daerah..."
-            disabled={userRole !== 'admin'}
-            className={`w-full p-4 backdrop-blur-xl rounded-2xl border-2 outline-none transition-all text-sm font-semibold text-center shadow-inner ${
-              isLight
-                ? 'bg-black/20 border-pink-300/40 text-white focus:border-white focus:bg-black/30 focus:ring-4 focus:ring-white/20 placeholder:text-pink-200/70'
-                : 'bg-black/30 border-white/20 text-white focus:border-cyan-400 focus:bg-black/40 focus:ring-4 focus:ring-cyan-400/30 placeholder:text-slate-300/70'
-            } ${userRole !== 'admin' ? 'cursor-not-allowed opacity-95 font-bold' : ''}`}
-            value={inputKetik}
-            onChange={(e) => {
-              if (userRole === 'admin') {
+        {/* Khusus Admin: Input Cari & Dropdown Search */}
+        {userRole === 'admin' ? (
+          <div className="relative w-full mb-4">
+            <input
+              type="text"
+              placeholder="Cari Perangkat Daerah..."
+              className={`w-full p-4 backdrop-blur-xl rounded-2xl border-2 outline-none transition-all text-sm font-semibold text-center shadow-inner ${
+                isLight
+                  ? 'bg-black/20 border-pink-300/40 text-white focus:border-white focus:bg-black/30 focus:ring-4 focus:ring-white/20 placeholder:text-pink-200/70'
+                  : 'bg-black/30 border-white/20 text-white focus:border-cyan-400 focus:bg-black/40 focus:ring-4 focus:ring-cyan-400/30 placeholder:text-slate-300/70'
+              }`}
+              value={inputKetik}
+              onChange={(e) => {
                 setInputKetik(e.target.value);
                 setShowDropdown(true);
-              }
-            }}
-            onFocus={() => {
-              if (userRole === 'admin') setShowDropdown(true);
-            }}
-            onBlur={() => {
-              setTimeout(() => {
-                setShowDropdown(false);
-              }, 200);
-            }}
-          />
+              }}
+              onFocus={() => setShowDropdown(true)}
+              onBlur={() => {
+                setTimeout(() => {
+                  setShowDropdown(false);
+                }, 200);
+              }}
+            />
 
-          {showDropdown && inputKetik.length > 0 && userRole === 'admin' && (
-            <ul
-              className={`absolute left-0 right-0 mt-2 backdrop-blur-2xl border rounded-2xl shadow-2xl max-h-36 overflow-y-auto z-50 p-2 text-left ${
-                isLight
-                  ? 'bg-[#9b0948]/95 border-pink-400/40 text-white'
-                  : 'bg-[#100522]/95 border-white/20 text-slate-100'
-              }`}
-            >
-              {loading ? (
-                <li className="p-3 text-xs text-center opacity-70">Loading...</li>
-              ) : filtered.length > 0 ? (
-                filtered.map((item, idx) => (
-                  <li
-                    key={idx}
-                    className={`p-3 rounded-xl cursor-pointer transition-colors text-xs font-semibold ${
-                      isLight
-                        ? 'hover:bg-white/20 hover:text-white text-pink-100'
-                        : 'hover:bg-white/25 hover:text-white text-slate-100'
-                    }`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      if (item.unit_kerja === 'SEMUA PERANGKAT DAERAH') {
-                        router.push('/dashboard/SEMUA');
-                      } else {
-                        router.push(`/dashboard/${encodeURIComponent(item.unit_kerja)}`);
-                      }
-                    }}
-                  >
-                    {item.unit_kerja}
+            {showDropdown && inputKetik.length > 0 && (
+              <ul
+                className={`absolute left-0 right-0 mt-2 backdrop-blur-2xl border rounded-2xl shadow-2xl max-h-36 overflow-y-auto z-50 p-2 text-left ${
+                  isLight
+                    ? 'bg-[#9b0948]/95 border-pink-400/40 text-white'
+                    : 'bg-[#100522]/95 border-white/20 text-slate-100'
+                }`}
+              >
+                {loading ? (
+                  <li className="p-3 text-xs text-center opacity-70">Loading...</li>
+                ) : filtered.length > 0 ? (
+                  filtered.map((item, idx) => {
+                    const unitStr = Array.isArray(item.unit_kerja) ? item.unit_kerja.join(', ') : item.unit_kerja;
+                    return (
+                      <li
+                        key={idx}
+                        className={`p-3 rounded-xl cursor-pointer transition-colors text-xs font-semibold ${
+                          isLight
+                            ? 'hover:bg-white/20 hover:text-white text-pink-100'
+                            : 'hover:bg-white/25 hover:text-white text-slate-100'
+                        }`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (unitStr === 'SEMUA PERANGKAT DAERAH') {
+                            router.push('/dashboard/SEMUA');
+                          } else {
+                            router.push(`/dashboard/${encodeURIComponent(unitStr)}`);
+                          }
+                        }}
+                      >
+                        {unitStr}
+                      </li>
+                    );
+                  })
+                ) : (
+                  <li className="p-3 text-xs text-center opacity-70">
+                    Maaf data yang Anda cari tidak tersedia
                   </li>
-                ))
-              ) : (
-                <li className="p-3 text-xs text-center opacity-70">
-                  Maaf data yang Anda cari tidak tersedia
-                </li>
-              )}
-            </ul>
-          )}
-        </div>
+                )}
+              </ul>
+            )}
+          </div>
+        ) : (
+          /* User Biasa: Dropdown Pilihan jika Multi-Unit, atau Info Tunggal */
+          <div className="w-full mb-4">
+            {Array.isArray(userUnitKerja) && userUnitKerja.length > 1 ? (
+              <div className="space-y-2">
+                <label className="text-xs font-semibold opacity-90 block text-center">
+                  Anda memiliki akses ke beberapa Unit Kerja:
+                </label>
+                <select
+                  value={selectedUserUnit}
+                  onChange={(e) => setSelectedUserUnit(e.target.value)}
+                  className={`w-full p-4 rounded-2xl border-2 outline-none text-sm font-semibold text-center cursor-pointer ${
+                    isLight
+                      ? 'bg-black/20 border-pink-300/40 text-white'
+                      : 'bg-black/40 border-white/30 text-white'
+                  }`}
+                >
+                  {userUnitKerja.map((u, i) => (
+                    <option key={i} value={u} className="bg-slate-900 text-white">
+                      {u}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div
+                className={`w-full p-4 rounded-2xl border-2 text-sm font-semibold text-center ${
+                  isLight ? 'bg-black/20 border-pink-300/40' : 'bg-black/30 border-white/20'
+                }`}
+              >
+                {Array.isArray(userUnitKerja) ? userUnitKerja[0] : userUnitKerja || 'Memuat...'}
+              </div>
+            )}
+          </div>
+        )}
 
+        {/* Tombol Masuk untuk User Biasa */}
         {userRole !== 'admin' && (
           <button
             onClick={() => {
-              const targetUnit = userUnitKerja || inputKetik;
+              const targetUnit = selectedUserUnit || (Array.isArray(userUnitKerja) ? userUnitKerja[0] : userUnitKerja);
               if (targetUnit) {
                 router.push(`/dashboard/${encodeURIComponent(targetUnit)}`);
               } else {
@@ -437,6 +471,8 @@ export default function Home() {
         <div className="mt-4 text-[10px] font-mono tracking-widest opacity-60 uppercase">
           {userRole === 'admin'
             ? `${lokasi.length} DATA TERSEDIA`
+            : Array.isArray(userUnitKerja)
+            ? `${userUnitKerja.length} AKSES UNIT KERJA TERSEDIA`
             : 'AKSES UNIT KERJA TERBATAS'}
         </div>
       </div>
@@ -466,7 +502,7 @@ export default function Home() {
               BKPSDM
             </h2>
             <p className="mt-4 text-slate-100 text-lg font-semibold tracking-wide">Bidang Evaluasi Kinerja dan Pembinaan Aparatur - 2026</p>
-            <p className="mt-2 text-slate-400 text-xs uppercase tracking-widest">(Klik di mana saja buat keluar)</p>
+            <p className="mt-2 text-slate-400 text-xs uppercase tracking-widest">(Klik di mana saja untuk keluar)</p>
           </div>
         </div>
       )}
@@ -474,221 +510,99 @@ export default function Home() {
       {/* Custom Keyframes & Utility Styles */}
       <style jsx global>{`
         @keyframes gradientAnimation {
-          0% {
-            background-position: 0% 50%, 0% 0%, 0% 50%;
-          }
-          50% {
-            background-position: 100% 50%, 50% 100%, 100% 50%;
-          }
-          100% {
-            background-position: 0% 50%, 0% 0%, 0% 50%;
-          }
+          0% { background-position: 0% 50%, 0% 0%, 0% 50%; }
+          50% { background-position: 100% 50%, 50% 100%, 100% 50%; }
+          100% { background-position: 0% 50%, 0% 0%, 0% 50%; }
         }
         @keyframes blobMotion {
-          0%,
-          100% {
-            transform: translate(0px, 0px) scale(1);
-          }
-          33% {
-            transform: translate(35px, -45px) scale(1.12);
-          }
-          66% {
-            transform: translate(-25px, 25px) scale(0.88);
-          }
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          33% { transform: translate(35px, -45px) scale(1.12); }
+          66% { transform: translate(-25px, 25px) scale(0.88); }
         }
         @keyframes splashSpinSlow {
-          0% {
-            transform: rotate(0deg) scale(1);
-          }
-          50% {
-            transform: rotate(180deg) scale(1.15);
-          }
-          100% {
-            transform: rotate(360deg) scale(1);
-          }
+          0% { transform: rotate(0deg) scale(1); }
+          50% { transform: rotate(180deg) scale(1.15); }
+          100% { transform: rotate(360deg) scale(1); }
         }
         @keyframes splashPulse {
-          0%,
-          100% {
-            transform: scale(1) translateY(0);
-            opacity: 0.7;
-          }
-          50% {
-            transform: scale(1.2) translateY(-20px);
-            opacity: 0.95;
-          }
+          0%, 100% { transform: scale(1) translateY(0); opacity: 0.7; }
+          50% { transform: scale(1.2) translateY(-20px); opacity: 0.95; }
         }
         @keyframes matrixRain {
-          0% {
-            transform: translateY(-100%);
-          }
-          100% {
-            transform: translateY(100vh);
-          }
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(100vh); }
         }
         @keyframes floatParticle {
-          0%,
-          100% {
-            transform: translateY(0px) translateX(0px);
-            opacity: 0.2;
-          }
-          50% {
-            transform: translateY(-30px) translateX(15px);
-            opacity: 0.8;
-          }
+          0%, 100% { transform: translateY(0px) translateX(0px); opacity: 0.2; }
+          50% { transform: translateY(-30px) translateX(15px); opacity: 0.8; }
         }
         @keyframes liquidWave {
-          0% {
-            transform: translateX(0) translateZ(0) scaleY(1);
-          }
-          50% {
-            transform: translateX(-25%) translateZ(0) scaleY(1.2);
-          }
-          100% {
-            transform: translateX(-50%) translateZ(0) scaleY(1);
-          }
+          0% { transform: translateX(0) translateZ(0) scaleY(1); }
+          50% { transform: translateX(-25%) translateZ(0) scaleY(1.2); }
+          100% { transform: translateX(-50%) translateZ(0) scaleY(1); }
         }
         @keyframes auroraGlow {
-          0%,
-          100% {
-            transform: translateY(0) scale(1);
-            opacity: 0.2;
-          }
-          50% {
-            transform: translateY(20px) scale(1.1);
-            opacity: 0.4;
-          }
+          0%, 100% { transform: translateY(0) scale(1); opacity: 0.2; }
+          50% { transform: translateY(20px) scale(1.1); opacity: 0.4; }
         }
-        .animate-matrix-rain {
-          animation: matrixRain 4s linear infinite;
-        }
-        .animate-matrix-rain-slow {
-          animation: matrixRain 7s linear infinite;
-        }
-        .animate-matrix-rain-fast {
-          animation: matrixRain 2.5s linear infinite;
-        }
-        .animate-float-particle {
-          animation: floatParticle 6s ease-in-out infinite;
-        }
-        .animate-liquid-wave {
-          animation: liquidWave 8s ease-in-out infinite;
-        }
-        .animate-aurora-glow {
-          animation: auroraGlow 10s ease-in-out infinite;
-        }
-        .writing-mode-vertical {
-          writing-mode: vertical-lr;
-        }
+        .animate-matrix-rain { animation: matrixRain 4s linear infinite; }
+        .animate-matrix-rain-slow { animation: matrixRain 7s linear infinite; }
+        .animate-matrix-rain-fast { animation: matrixRain 2.5s linear infinite; }
+        .animate-float-particle { animation: floatParticle 6s ease-in-out infinite; }
+        .animate-liquid-wave { animation: liquidWave 8s ease-in-out infinite; }
+        .animate-aurora-glow { animation: auroraGlow 10s ease-in-out infinite; }
+        .writing-mode-vertical { writing-mode: vertical-lr; }
         .animated-bg {
           background-size: 200% 200%, 200% 200%, 400% 400%;
           animation: gradientAnimation 15s ease infinite;
         }
         .theme-neon {
-          background-image: radial-gradient(
-              circle at 20% 30%,
-              rgba(238, 129, 248, 0.6) 0%,
-              transparent 40%
-            ),
+          background-image: radial-gradient(circle at 20% 30%, rgba(238, 129, 248, 0.6) 0%, transparent 40%),
             radial-gradient(circle at 80% 70%, rgb(245, 42, 245) 0%, transparent 40%),
             linear-gradient(-45deg, #00fcd2, #b163ff, #ff007f, #a12471);
         }
-        .theme-neon .orb-1 {
-          background-color: rgba(183, 255, 0, 0.16);
-        }
-        .theme-neon .orb-2 {
-          background-color: rgba(204, 255, 0, 0.14);
-        }
-        .theme-neon .orb-3 {
-          background-color: rgba(149, 215, 0, 0.12);
-        }
+        .theme-neon .orb-1 { background-color: rgba(183, 255, 0, 0.16); }
+        .theme-neon .orb-2 { background-color: rgba(204, 255, 0, 0.14); }
+        .theme-neon .orb-3 { background-color: rgba(149, 215, 0, 0.12); }
         .theme-sunset {
-          background-image: radial-gradient(
-              circle at 20% 30%,
-              rgba(255, 183, 77, 0.6) 0%,
-              transparent 40%
-            ),
+          background-image: radial-gradient(circle at 20% 30%, rgba(255, 183, 77, 0.6) 0%, transparent 40%),
             radial-gradient(circle at 80% 70%, rgba(244, 67, 54, 0.6) 0%, transparent 40%),
             linear-gradient(-45deg, #ff9800, #e91e63, #9c27b0, #3f51b5);
         }
-        .theme-sunset .orb-1 {
-          background-color: rgba(255, 193, 7, 0.2);
-        }
-        .theme-sunset .orb-2 {
-          background-color: rgba(255, 87, 34, 0.2);
-        }
-        .theme-sunset .orb-3 {
-          background-color: rgba(156, 39, 176, 0.2);
-        }
+        .theme-sunset .orb-1 { background-color: rgba(255, 193, 7, 0.2); }
+        .theme-sunset .orb-2 { background-color: rgba(255, 87, 34, 0.2); }
+        .theme-sunset .orb-3 { background-color: rgba(156, 39, 176, 0.2); }
         .theme-ocean {
-          background-image: radial-gradient(
-              circle at 20% 30%,
-              rgba(0, 229, 255, 0.6) 0%,
-              transparent 40%
-            ),
+          background-image: radial-gradient(circle at 20% 30%, rgba(0, 229, 255, 0.6) 0%, transparent 40%),
             radial-gradient(circle at 80% 70%, rgba(41, 121, 255, 0.6) 0%, transparent 40%),
             linear-gradient(-45deg, #002b36, #073642, #268bd2, #2aa198);
         }
-        .theme-ocean .orb-1 {
-          background-color: rgba(0, 229, 255, 0.2);
-        }
-        .theme-ocean .orb-2 {
-          background-color: rgba(41, 121, 255, 0.2);
-        }
-        .theme-ocean .orb-3 {
-          background-color: rgba(0, 150, 136, 0.2);
-        }
+        .theme-ocean .orb-1 { background-color: rgba(0, 229, 255, 0.2); }
+        .theme-ocean .orb-2 { background-color: rgba(41, 121, 255, 0.2); }
+        .theme-ocean .orb-3 { background-color: rgba(0, 150, 136, 0.2); }
         .theme-emerald {
-          background-image: radial-gradient(
-              circle at 20% 30%,
-              rgba(0, 230, 118, 0.5) 0%,
-              transparent 40%
-            ),
+          background-image: radial-gradient(circle at 20% 30%, rgba(0, 230, 118, 0.5) 0%, transparent 40%),
             radial-gradient(circle at 80% 70%, rgba(0, 150, 136, 0.5) 0%, transparent 40%),
             linear-gradient(-45deg, #0f2027, #203a43, #2c5364, #004d40);
         }
-        .theme-emerald .orb-1 {
-          background-color: rgba(0, 230, 118, 0.15);
-        }
-        .theme-emerald .orb-2 {
-          background-color: rgba(76, 175, 80, 0.15);
-        }
-        .theme-emerald .orb-3 {
-          background-color: rgba(0, 150, 136, 0.15);
-        }
+        .theme-emerald .orb-1 { background-color: rgba(0, 230, 118, 0.15); }
+        .theme-emerald .orb-2 { background-color: rgba(76, 175, 80, 0.15); }
+        .theme-emerald .orb-3 { background-color: rgba(0, 150, 136, 0.15); }
         .theme-splash {
           background-color: #f8fafc;
           background-image: radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%);
         }
-        .animate-splash-spin-slow {
-          animation: splashSpinSlow 25s linear infinite;
-        }
-        .animate-splash-pulse {
-          animation: splashPulse 7s ease-in-out infinite;
-        }
-        .theme-splash .orb-1 {
-          background-color: rgb(252, 94, 146);
-        }
-        .theme-splash .orb-2 {
-          background-color: rgb(109, 206, 248);
-        }
-        .theme-splash .orb-3 {
-          background-color: rgba(255, 196, 86, 0.91);
-        }
-        .animate-blob {
-          animation: blobMotion 9s infinite ease-in-out;
-        }
+        .animate-splash-spin-slow { animation: splashSpinSlow 25s linear infinite; }
+        .animate-splash-pulse { animation: splashPulse 7s ease-in-out infinite; }
+        .theme-splash .orb-1 { background-color: rgb(252, 94, 146); }
+        .theme-splash .orb-2 { background-color: rgb(109, 206, 248); }
+        .theme-splash .orb-3 { background-color: rgba(255, 196, 86, 0.91); }
+        .animate-blob { animation: blobMotion 9s infinite ease-in-out; }
         @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
-        .animate-fade-in {
-          animation: fadeIn 0.3s ease-out;
-        }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
       `}</style>
     </main>
   );

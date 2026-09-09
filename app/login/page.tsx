@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/app/lib/supabase' // sesuaikan path jika lib lu ada di @/lib/supabase
 
 export default function LoginPage() {
   const [nip, setNip] = useState('')
@@ -10,58 +11,74 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('')
   const router = useRouter()
 
-  // SINKRONISASI 1: Cek otomatis status login menggunakan token JWT
+  // SINKRONISASI 1: Cek otomatis session Supabase
   useEffect(() => {
-    const token = localStorage.getItem('dypral_token')
-    const session = localStorage.getItem('dypral_session')
-    
-    if (token && session) {
-      const { role, unitKerja } = JSON.parse(session)
-      if (role === 'admin') {
-        router.push('/')
-      } else {
-        router.push(`/dashboard/${encodeURIComponent(unitKerja)}`)
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        // Ambil data profil dari tabel users_login berdasarkan user_id
+        const { data: userProfile } = await supabase
+          .from('users_login')
+          .select('role, unit_kerja')
+          .eq('user_id', session.user.id)
+          .single()
+
+        if (userProfile) {
+          if (userProfile.role === 'admin') {
+            router.push('/')
+          } else {
+            router.push(`/dashboard/${encodeURIComponent(userProfile.unit_kerja)}`)
+          }
+        }
       }
     }
+
+    checkSession()
   }, [router])
 
-  // SINKRONISASI 2: Fungsi handleLogin yang nembak ke Backend Python FastAPI
+  // SINKRONISASI 2: Login via Supabase Auth & ambil data profil
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setErrorMsg('')
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      
-      const response = await fetch(`${backendUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ nip, password }),
+      // 1. Format NIP ke email dummy
+      const emailDummy = `${nip.trim()}@bidangekpa.com`
+
+      // 2. Login ke Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: emailDummy,
+        password: password,
       })
 
-      const resData = await response.json()
-
-      if (!response.ok) {
-        throw new Error(resData.detail || 'NIP atau Password salah, silakan coba lagi.')
+      if (authError) {
+        throw new Error('NIP atau Password salah, silakan coba lagi.')
       }
 
-      const { access_token, user } = resData
-      const role = user.role || 'user'
-      const unitKerja = user.unit_kerja || ''
+      // 3. Ambil role dan unit_kerja dari tabel users_login
+      const { data: userProfile, error: profileError } = await supabase
+        .from('users_login')
+        .select('role, unit_kerja')
+        .eq('user_id', authData.user.id)
+        .single()
 
-      localStorage.setItem('dypral_token', access_token)
-      localStorage.setItem('dypral_session', JSON.stringify({ nip, role, unitKerja }))
+      if (profileError || !userProfile) {
+        throw new Error('Data profil pegawai tidak ditemukan.')
+      }
 
+      const role = userProfile.role || 'user'
+      const unitKerja = userProfile.unit_kerja || ''
+
+      // 4. Redirect sesuai role
       if (role === 'admin') {
-        router.push('/') 
+        router.push('/')
       } else {
         router.push(`/dashboard/${encodeURIComponent(unitKerja)}`)
       }
+
     } catch (err: any) {
-      setErrorMsg(err.message || 'Gagal terhubung ke server backend.')
+      setErrorMsg(err.message || 'Gagal masuk ke dalam sistem.')
     } finally {
       setLoading(false)
     }
