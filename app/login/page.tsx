@@ -2,21 +2,52 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/app/lib/supabase' // sesuaikan path jika lib lu ada di @/lib/supabase
+import { supabase } from '@/app/lib/supabase'
+
+type ThemeType = 'neon' | 'sunset' | 'ocean' | 'emerald' | 'splash';
+
+const themes: { id: ThemeType; label: string; desc: string }[] = [
+  { id: 'neon', label: 'Cyber Neon', desc: 'Terang & Futuristik' },
+  { id: 'sunset', label: 'Sunset Vibes', desc: 'Hangat & Elegan' },
+  { id: 'ocean', label: 'Deep Ocean', desc: 'Tenang & Profesional' },
+  { id: 'emerald', label: 'Emerald Dark', desc: 'Segar & Fokus' },
+  { id: 'splash', label: 'Paint Splash', desc: 'Putih Bersih & Cipratan Cat' },
+];
 
 export default function LoginPage() {
   const [nip, setNip] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  
+  const [theme, setTheme] = useState<ThemeType>('neon');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  
   const router = useRouter()
+
+  // Helper untuk mengambil unit pertama secara bersih jika berupa array/JSON multi-unit
+  const getCleanUnit = (unitData: any): string => {
+    if (!unitData) return '';
+    if (Array.isArray(unitData)) {
+      return String(unitData[0] || '').trim();
+    }
+    try {
+      const parsed = typeof unitData === 'string' ? JSON.parse(unitData) : unitData;
+      if (Array.isArray(parsed)) {
+        return String(parsed[0] || '').trim();
+      }
+    } catch {
+      const firstPart = String(unitData).replace(/[\[\]"]/g, '').split(',')[0];
+      return firstPart.trim();
+    }
+    return String(unitData).replace(/[\[\]"]/g, '').trim();
+  };
 
   // SINKRONISASI 1: Cek otomatis session Supabase
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (session) {
-        // Ambil data profil dari tabel users_login berdasarkan user_id
         const { data: userProfile } = await supabase
           .from('users_login')
           .select('role, unit_kerja')
@@ -27,7 +58,8 @@ export default function LoginPage() {
           if (userProfile.role === 'admin') {
             router.push('/')
           } else {
-            router.push(`/dashboard/${encodeURIComponent(userProfile.unit_kerja)}`)
+            const cleanUnit = getCleanUnit(userProfile.unit_kerja);
+            router.push(`/dashboard/${encodeURIComponent(cleanUnit)}`)
           }
         }
       }
@@ -36,6 +68,19 @@ export default function LoginPage() {
     checkSession()
   }, [router])
 
+  // Sinkronisasi tema dari localStorage
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('dypral_theme') as ThemeType;
+    if (savedTheme) {
+      setTheme(savedTheme);
+    }
+  }, []);
+
+  const handleThemeChange = (newTheme: ThemeType) => {
+    setTheme(newTheme);
+    localStorage.setItem('dypral_theme', newTheme);
+  };
+
   // SINKRONISASI 2: Login via Supabase Auth & ambil data profil
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -43,7 +88,7 @@ export default function LoginPage() {
     setErrorMsg('')
 
     try {
-      // 1. Format NIP ke email dummy
+      // 1. Format NIP ke email dummy sesuai aslinya
       const emailDummy = `${nip.trim()}@bidangekpa.com`
 
       // 2. Login ke Supabase Auth
@@ -52,7 +97,7 @@ export default function LoginPage() {
         password: password,
       })
 
-      if (authError) {
+      if (authError || !authData.user) {
         throw new Error('NIP atau Password salah, silakan coba lagi.')
       }
 
@@ -68,13 +113,13 @@ export default function LoginPage() {
       }
 
       const role = userProfile.role || 'user'
-      const unitKerja = userProfile.unit_kerja || ''
 
-      // 4. Redirect sesuai role
+      // 4. Redirect sesuai role dengan unit yang sudah dibersihkan
       if (role === 'admin') {
         router.push('/')
       } else {
-        router.push(`/dashboard/${encodeURIComponent(unitKerja)}`)
+        const cleanUnit = getCleanUnit(userProfile.unit_kerja);
+        router.push(`/dashboard/${encodeURIComponent(cleanUnit)}`)
       }
 
     } catch (err: any) {
@@ -84,46 +129,178 @@ export default function LoginPage() {
     }
   }
 
-  return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 p-4 relative overflow-hidden">
-      <div className="absolute -top-40 -left-40 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none"></div>
+  const isLight = theme === 'splash';
 
-      <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 shadow-2xl relative z-10">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
+  return (
+    <main className={`min-h-screen flex items-center justify-center p-4 relative overflow-hidden transition-colors duration-700 animated-bg theme-${theme}`}>
+      
+      {/* BACKGROUND ANIMASI & MATRIX */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute inset-0 opacity-20 flex justify-between overflow-hidden px-4">
+          <div className="text-cyan-400 text-xs font-mono animate-matrix-rain writing-mode-vertical">01010101 DYPRAL 10101</div>
+          <div className="text-pink-400 text-xs font-mono animate-matrix-rain-slow writing-mode-vertical" style={{ animationDelay: '2s' }}>1100101 BKPSDM 01011</div>
+          <div className="text-purple-400 text-xs font-mono animate-matrix-rain writing-mode-vertical" style={{ animationDelay: '4s' }}>01101010 CUKMINI 11001</div>
+          <div className="text-emerald-400 text-xs font-mono animate-matrix-rain-fast writing-mode-vertical" style={{ animationDelay: '1s' }}>10101010 SYSTEM 01010</div>
+          <div className="text-yellow-400 text-xs font-mono animate-matrix-rain-slow writing-mode-vertical" style={{ animationDelay: '3.5s' }}>00112233 KODE 112233</div>
+        </div>
+
+        <div className="absolute inset-0">
+          <div className="absolute top-1/4 left-1/5 w-2 h-2 bg-white/40 rounded-full animate-float-particle"></div>
+          <div className="absolute top-3/4 left-2/3 w-3 h-3 bg-cyan-300/30 rounded-full animate-float-particle" style={{ animationDelay: '3s' }}></div>
+        </div>
+
+        <div className="absolute bottom-0 left-0 right-0 h-40 opacity-20 overflow-hidden">
+          <div className="absolute w-[200%] h-full animate-liquid-wave bg-gradient-to-r from-transparent via-cyan-400/30 to-transparent rounded-t-[100%]"></div>
+        </div>
+
+        <div className="absolute -top-40 left-0 right-0 h-96 opacity-25 filter blur-[90px] animate-aurora-glow bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500"></div>
+      </div>
+
+      {/* BACKGROUND SVG PAINT SPLASH */}
+      {isLight && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 opacity-85">
+          <svg className="absolute -top-16 -left-16 w-[550px] h-[550px] animate-splash-spin-slow text-pink-500/40" viewBox="0 0 200 200" fill="currentColor">
+            <path d="M38.2,-52.1C50.2,-43.3,61.3,-33.5,67.4,-20.5C73.6,-7.5,74.8,8.8,69.5,22.2C64.3,35.6,52.6,46.1,39.1,53.8C25.6,61.4,10.2,66.2,-3.3,65.6C-16.8,65,-28.4,59.1,-39.9,50.7C-51.4,42.4,-62.8,31.6,-67.9,17.9C-73,4.2,-71.8,-12.4,-63.9,-25.6C-56,-38.8,-41.4,-48.6,-27.8,-56.3C-14.2,-64.1,-1.6,-69.8,11.2,-67.2C24,-64.6,26.2,-60.9,38.2,-52.1Z" transform="translate(100 100)" />
+          </svg>
+          <svg className="absolute -top-12 -right-16 w-[650px] h-[650px] animate-splash-pulse text-sky-400/40" viewBox="0 0 200 200" fill="currentColor">
+            <path d="M42.7,-54.1C55.4,-44.6,66.5,-32.5,71.7,-18.2C76.8,-3.8,76,12.8,69.4,26.5C62.9,40.3,50.5,51.2,36.5,58.8C22.4,66.4,6.7,70.7,-8.4,68.9C-23.5,67,-38,59,-50.2,47.8C-62.4,36.6,-72.2,22.2,-73.4,6.9C-74.7,-8.3,-67.4,-24.4,-56.3,-35.1C-45.1,-45.8,-30.1,-51.1,-16.2,-59.2C-2.4,-67.3,10.3,-78.2,24.1,-75.4C37.8,-72.7,30,-63.6,42.7,-54.1Z" transform="translate(100 100)" />
+          </svg>
+        </div>
+      )}
+
+      {/* Tombol Tema */}
+      <div className="fixed top-4 right-4 z-40 flex items-center gap-2">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className={`backdrop-blur-xl p-3 rounded-2xl border shadow-2xl flex items-center gap-2 transition-all duration-300 hover:scale-105 group ${
+            isLight 
+              ? 'bg-white/90 hover:bg-white border-slate-300 text-slate-800 shadow-purple-500/10' 
+              : 'bg-black/40 hover:bg-black/60 border-white/20 text-white'
+          }`}
+          title="Ganti Tema"
+        >
+          <svg className={`w-5 h-5 transition-transform group-hover:rotate-90 duration-500 ${isLight ? 'text-purple-600' : 'text-cyan-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 73.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+          </svg>
+          <span className="text-xs font-bold uppercase tracking-wider hidden sm:inline">Tema</span>
+        </button>
+      </div>
+
+      {/* Drawer Samping Tema */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 transition-opacity animate-fade-in"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <div className={`fixed top-0 right-0 h-full w-80 ${isLight ? 'bg-slate-900/95 text-white' : 'bg-[#0c0418]/90'} backdrop-blur-2xl border-l border-white/20 shadow-[_-20px_0_50px_rgba(0,0,0,0.7)] z-50 p-6 flex flex-col justify-between transition-transform duration-500 ease-in-out ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div>
+          <div className="flex items-center justify-between pb-6 border-b border-white/10">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></div>
+              <h2 className="text-white font-extrabold text-base tracking-wide uppercase">Pilih Tema Tampilan</h2>
+            </div>
+            <button 
+              onClick={() => setSidebarOpen(false)}
+              className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3">
+            {themes.map((t) => {
+              const isSelected = theme === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => handleThemeChange(t.id)}
+                  className={`w-full p-4 rounded-2xl border text-left transition-all duration-300 flex items-center justify-between group ${
+                    isSelected 
+                      ? 'bg-gradient-to-r from-cyan-500/25 to-purple-500/25 border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.3)] scale-[1.02]' 
+                      : 'bg-black/30 border-white/10 hover:bg-white/10 hover:border-white/30 text-slate-300'
+                  }`}
+                >
+                  <div>
+                    <div className={`text-sm font-bold ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                      {t.label}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      {t.desc}
+                    </div>
+                  </div>
+                  {isSelected && (
+                    <div className="w-5 h-5 rounded-full bg-cyan-400 flex items-center justify-center text-slate-900 font-bold text-xs shadow-md">
+                      ✓
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="pt-6 border-t border-white/10 text-center">
+          <p className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">
+            DyPRAL Dynamic Theme Engine
+          </p>
+        </div>
+      </div>
+
+      {/* Orbs Background */}
+      <div className="absolute top-10 left-10 w-[400px] h-[400px] rounded-full blur-[130px] pointer-events-none animate-blob orb-1 transition-all duration-700"></div>
+      <div className="absolute top-1/3 right-10 w-[450px] h-[450px] rounded-full blur-[140px] pointer-events-none animate-blob orb-2 transition-all duration-700" style={{ animationDelay: '2.5s' }}></div>
+      <div className="absolute bottom-10 left-1/3 w-[420px] h-[420px] rounded-full blur-[150px] pointer-events-none animate-blob orb-3 transition-all duration-700" style={{ animationDelay: '5s' }}></div>
+
+      {/* Card Login */}
+      <div className={`w-full max-w-md backdrop-blur-2xl rounded-3xl border relative z-10 p-6 sm:p-8 flex flex-col items-center my-auto shadow-2xl transition-colors duration-700 ${
+        isLight 
+          ? 'bg-white/30 border-pink-200/60 text-slate-900 shadow-pink-500/10' 
+          : 'bg-black/25 border-white/20 text-white shadow-black/40'
+      }`}>
+        <div className="text-center mb-8 w-full">
+          <h1 className={`text-2xl font-black tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
             Dashboard Kinerja
           </h1>
-          <p className="text-sm text-slate-400 mt-2">Masuk menggunakan NIP dan Password</p>
+          <p className={`text-xs mt-2 ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>Masuk menggunakan NIP dan Password</p>
         </div>
 
         {errorMsg && (
-          <div className="mb-4 p-3 text-xs bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg">
+          <div className="mb-4 p-3 text-xs bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl w-full">
             {errorMsg}
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        <form onSubmit={handleLogin} className="space-y-4 w-full">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">NIP</label>
+            <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>NIP</label>
             <input
               type="text"
               value={nip}
               onChange={(e) => setNip(e.target.value)}
               required
-              className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-800 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 transition-colors"
+              className={`w-full px-4 py-3 border rounded-xl text-sm focus:outline-none transition-colors ${
+                isLight 
+                  ? 'bg-white/70 border-slate-200 text-slate-900 focus:border-teal-500' 
+                  : 'bg-black/40 border-white/20 text-slate-100 focus:border-cyan-400'
+              }`}
               placeholder="Masukkan NIP Anda"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">Password</label>
+            <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-800 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 transition-colors"
+              className={`w-full px-4 py-3 border rounded-xl text-sm focus:outline-none transition-colors ${
+                isLight 
+                  ? 'bg-white/70 border-slate-200 text-slate-900 focus:border-teal-500' 
+                  : 'bg-black/40 border-white/20 text-slate-100 focus:border-cyan-400'
+              }`}
               placeholder="••••••••"
             />
           </div>
@@ -131,12 +308,162 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full mt-2 py-3 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-medium rounded-xl text-sm shadow-lg shadow-indigo-500/20 transition-all disabled:opacity-50"
+            className="w-full mt-2 py-3.5 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-400 hover:to-cyan-500 text-white font-bold rounded-xl text-xs uppercase tracking-wider shadow-lg shadow-teal-500/20 transition-all transform hover:scale-[1.02] disabled:opacity-50 cursor-pointer"
           >
             {loading ? 'Memproses...' : 'Masuk Sistem'}
           </button>
         </form>
       </div>
+
+      {/* CSS & Keyframes Tema & Animasi */}
+      <style jsx global>{`
+        @keyframes gradientAnimation {
+          0% { background-position: 0% 50%, 0% 0%, 0% 50%; }
+          50% { background-position: 100% 50%, 50% 100%, 100% 50%; }
+          100% { background-position: 0% 50%, 0% 0%, 0% 50%; }
+        }
+
+        @keyframes blobMotion {
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          33% { transform: translate(35px, -45px) scale(1.12); }
+          66% { transform: translate(-25px, 25px) scale(0.88); }
+        }
+
+        @keyframes splashSpinSlow {
+          0% { transform: rotate(0deg) scale(1); }
+          50% { transform: rotate(180deg) scale(1.15); }
+          100% { transform: rotate(360deg) scale(1); }
+        }
+
+        @keyframes splashPulse {
+          0%, 100% { transform: scale(1) translateY(0); opacity: 0.7; }
+          50% { transform: scale(1.2) translateY(-20px); opacity: 0.95; }
+        }
+
+        @keyframes matrixRain {
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(100vh); }
+        }
+
+        @keyframes floatParticle {
+          0%, 100% { transform: translateY(0px) translateX(0px); opacity: 0.2; }
+          50% { transform: translateY(-30px) translateX(15px); opacity: 0.8; }
+        }
+
+        @keyframes liquidWave {
+          0% { transform: translateX(0) translateZ(0) scaleY(1); }
+          50% { transform: translateX(-25%) translateZ(0) scaleY(1.2); }
+          100% { transform: translateX(-50%) translateZ(0) scaleY(1); }
+        }
+
+        @keyframes auroraGlow {
+          0%, 100% { transform: translateY(0) scale(1); opacity: 0.2; }
+          50% { transform: translateY(20px) scale(1.1); opacity: 0.4; }
+        }
+
+        .animate-matrix-rain {
+          animation: matrixRain 4s linear infinite;
+        }
+
+        .animate-matrix-rain-slow {
+          animation: matrixRain 7s linear infinite;
+        }
+
+        .animate-matrix-rain-fast {
+          animation: matrixRain 2.5s linear infinite;
+        }
+
+        .animate-float-particle {
+          animation: floatParticle 6s ease-in-out infinite;
+        }
+
+        .animate-liquid-wave {
+          animation: liquidWave 8s ease-in-out infinite;
+        }
+
+        .animate-aurora-glow {
+          animation: auroraGlow 10s ease-in-out infinite;
+        }
+
+        .writing-mode-vertical {
+          writing-mode: vertical-lr;
+        }
+
+        .animated-bg {
+          background-size: 200% 200%, 200% 200%, 400% 400%;
+          animation: gradientAnimation 15s ease infinite;
+        }
+
+        .theme-neon {
+          background-image: 
+            radial-gradient(circle at 20% 30%, rgba(238, 129, 248, 0.6) 0%, transparent 40%),
+            radial-gradient(circle at 80% 70%, rgb(245, 42, 245) 0%, transparent 40%),
+            linear-gradient(-45deg, #00fcd2, #b163ff, #ff007f, #a12471);
+        }
+        .theme-neon .orb-1 { background-color: rgba(183,255,0,0.16); }
+        .theme-neon .orb-2 { background-color: rgba(204,255,0,0.14); }
+        .theme-neon .orb-3 { background-color: rgba(149,215,0,0.12); }
+
+        .theme-sunset {
+          background-image: 
+            radial-gradient(circle at 20% 30%, rgba(255, 183, 77, 0.6) 0%, transparent 40%),
+            radial-gradient(circle at 80% 70%, rgba(244, 67, 54, 0.6) 0%, transparent 40%),
+            linear-gradient(-45deg, #ff9800, #e91e63, #9c27b0, #3f51b5);
+        }
+        .theme-sunset .orb-1 { background-color: rgba(255,193,7,0.2); }
+        .theme-sunset .orb-2 { background-color: rgba(255,87,34,0.2); }
+        .theme-sunset .orb-3 { background-color: rgba(156,39,176,0.2); }
+
+        .theme-ocean {
+          background-image: 
+            radial-gradient(circle at 20% 30%, rgba(0, 229, 255, 0.6) 0%, transparent 40%),
+            radial-gradient(circle at 80% 70%, rgba(41, 121, 255, 0.6) 0%, transparent 40%),
+            linear-gradient(-45deg, #002b36, #073642, #268bd2, #2aa198);
+        }
+        .theme-ocean .orb-1 { background-color: rgba(0,229,255,0.2); }
+        .theme-ocean .orb-2 { background-color: rgba(41,121,255,0.2); }
+        .theme-ocean .orb-3 { background-color: rgba(0,150,136,0.2); }
+
+        .theme-emerald {
+          background-image: 
+            radial-gradient(circle at 20% 30%, rgba(0, 230, 118, 0.5) 0%, transparent 40%),
+            radial-gradient(circle at 80% 70%, rgba(0, 150, 136, 0.5) 0%, transparent 40%),
+            linear-gradient(-45deg, #0f2027, #203a43, #2c5364, #004d40);
+        }
+        .theme-emerald .orb-1 { background-color: rgba(0,230,118,0.15); }
+        .theme-emerald .orb-2 { background-color: rgba(76,175,80,0.15); }
+        .theme-emerald .orb-3 { background-color: rgba(0,150,136,0.15); }
+
+        .theme-splash {
+          background-color: #f8fafc;
+          background-image: radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%);
+        }
+
+        .animate-splash-spin-slow {
+          animation: splashSpinSlow 25s linear infinite;
+        }
+
+        .animate-splash-pulse {
+          animation: splashPulse 7s ease-in-out infinite;
+        }
+
+        .theme-splash .orb-1 { background-color: rgb(252, 94, 146); }
+        .theme-splash .orb-2 { background-color: rgb(109, 206, 248); }
+        .theme-splash .orb-3 { background-color: rgba(255, 196, 86, 0.91); }
+
+        .animate-blob {
+          animation: blobMotion 9s infinite ease-in-out;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        .animate-fade-in {
+          animation: fadeIn 0.3s ease-out;
+        }
+      `}</style>
     </main>
   )
 }

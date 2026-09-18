@@ -330,7 +330,7 @@ export default function Home() {
       <div
         className={`w-full max-w-md backdrop-blur-2xl rounded-3xl border relative z-10 p-6 sm:p-8 flex flex-col items-center my-auto transition-colors duration-700 ${
           isLight
-            ? 'bg-[#8f128b]/95 border-pink-400/50 shadow-[0_20px_50px_rgba(198,14,94,0.4)] text-white'
+            ? 'bg-white/30 border-pink-200/60 shadow-[0_20px_50px_rgba(252,94,146,0.15)] text-slate-900'
             : 'bg-white/10 border-white/25 shadow-[0_20px_50px_rgba(0,0,0,0.4)] text-white'
         }`}
       >
@@ -342,8 +342,8 @@ export default function Home() {
           <Image alt="Logo DyPRAL" className="object-contain" fill priority src="/logo-bkpsdm.png"/>
         </div>
 
-        <h1 className="text-xl font-bold mb-2">Selamat Datang</h1>
-        <p className="text-xs opacity-80 mb-6 text-center">
+        <h1 className={`text-xl font-bold mb-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>Selamat Datang</h1>
+        <p className={`text-xs mb-6 text-center ${isLight ? 'text-slate-600' : 'opacity-85 text-slate-200'}`}>
           {userRole === 'admin'
             ? 'Pilih Perangkat Daerah untuk lanjut ke Dashboard'
             : 'Pilih / Masuk ke Unit Kerja Anda'}
@@ -357,7 +357,7 @@ export default function Home() {
               placeholder="Cari Perangkat Daerah..."
               className={`w-full p-4 backdrop-blur-xl rounded-2xl border-2 outline-none transition-all text-sm font-semibold text-center shadow-inner ${
                 isLight
-                  ? 'bg-black/20 border-pink-300/40 text-white focus:border-white focus:bg-black/30 focus:ring-4 focus:ring-white/20 placeholder:text-pink-200/70'
+                  ? 'bg-white/70 border-pink-300 text-slate-900 focus:border-pink-500 focus:bg-white focus:ring-4 focus:ring-pink-500/20 placeholder:text-slate-400'
                   : 'bg-black/30 border-white/20 text-white focus:border-cyan-400 focus:bg-black/40 focus:ring-4 focus:ring-cyan-400/30 placeholder:text-slate-300/70'
               }`}
               value={inputKetik}
@@ -377,7 +377,7 @@ export default function Home() {
               <ul
                 className={`absolute left-0 right-0 mt-2 backdrop-blur-2xl border rounded-2xl shadow-2xl max-h-36 overflow-y-auto z-50 p-2 text-left ${
                   isLight
-                    ? 'bg-[#9b0948]/95 border-pink-400/40 text-white'
+                    ? 'bg-white/95 border-pink-300 text-slate-800'
                     : 'bg-[#100522]/95 border-white/20 text-slate-100'
                 }`}
               >
@@ -391,7 +391,7 @@ export default function Home() {
                         key={idx}
                         className={`p-3 rounded-xl cursor-pointer transition-colors text-xs font-semibold ${
                           isLight
-                            ? 'hover:bg-white/20 hover:text-white text-pink-100'
+                            ? 'hover:bg-pink-50 hover:text-pink-600 text-slate-700'
                             : 'hover:bg-white/25 hover:text-white text-slate-100'
                         }`}
                         onMouseDown={(e) => e.preventDefault()}
@@ -420,7 +420,7 @@ export default function Home() {
           <div className="w-full mb-4">
             {Array.isArray(userUnitKerja) && userUnitKerja.length > 1 ? (
               <div className="space-y-2">
-                <label className="text-xs font-semibold opacity-90 block text-center">
+                <label className={`text-xs font-semibold block text-center ${isLight ? 'text-slate-700' : 'opacity-90'}`}>
                   Anda memiliki akses ke beberapa Unit Kerja:
                 </label>
                 <select
@@ -428,7 +428,7 @@ export default function Home() {
                   onChange={(e) => setSelectedUserUnit(e.target.value)}
                   className={`w-full p-4 rounded-2xl border-2 outline-none text-sm font-semibold text-center cursor-pointer ${
                     isLight
-                      ? 'bg-black/20 border-pink-300/40 text-white'
+                      ? 'bg-white/70 border-pink-300 text-slate-900'
                       : 'bg-black/40 border-white/30 text-white'
                   }`}
                 >
@@ -442,7 +442,7 @@ export default function Home() {
             ) : (
               <div
                 className={`w-full p-4 rounded-2xl border-2 text-sm font-semibold text-center ${
-                  isLight ? 'bg-black/20 border-pink-300/40' : 'bg-black/30 border-white/20'
+                  isLight ? 'bg-white/70 border-pink-300 text-slate-900' : 'bg-black/30 border-white/20 text-white'
                 }`}
               >
                 {Array.isArray(userUnitKerja) ? userUnitKerja[0] : userUnitKerja || 'Memuat...'}
@@ -462,13 +462,13 @@ export default function Home() {
                 alert('Unit kerja tidak ditemukan pada sesi Anda. Silakan login ulang.');
               }
             }}
-            className="w-full py-3.5 bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold rounded-2xl text-xs uppercase tracking-wider shadow-lg shadow-cyan-500/20 transition-all transform hover:scale-[1.02]"
+            className="w-full py-3.5 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-400 hover:to-cyan-500 text-white font-bold rounded-2xl text-xs uppercase tracking-wider shadow-lg shadow-teal-500/20 transition-all transform hover:scale-[1.02]"
           >
             Masuk ke Dashboard Unit Kerja Anda →
           </button>
         )}
 
-        <div className="mt-4 text-[10px] font-mono tracking-widest opacity-60 uppercase">
+        <div className={`mt-4 text-[10px] font-mono tracking-widest uppercase ${isLight ? 'text-slate-500' : 'opacity-60 text-slate-300'}`}>
           {userRole === 'admin'
             ? `${lokasi.length} DATA TERSEDIA`
             : Array.isArray(userUnitKerja)
